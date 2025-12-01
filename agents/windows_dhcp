@@ -29,8 +29,6 @@ LogFile  %MYLOGFILE%
 
 # INPUTS
 
-# 1) Windows Event Log – only DHCP Server events from the System log
-
 <Input im_msvistalog_1>
   Module        im_msvistalog
 
@@ -57,6 +55,5 @@ LogFile  %MYLOGFILE%
 # ROUTE
 
 <Route default_route>
-        # Send both DHCP EventLog and DHCP text logs to Taegis
-    Path im_msvistalog_1  => om_batchcompress_nxlog_platform_1
+  Path im_msvistalog_1  => om_batchcompress_nxlog_platform_1
 </Route>
