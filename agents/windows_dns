@@ -33,8 +33,6 @@ LogFile  %MYLOGFILE%
 
 # INPUTS
 
-# DNS ETW provider on DC1 (make sure im_etw is available and provider name exists)
-
 <Input ETW>
   Module         im_etw
   <Provider>
@@ -46,12 +44,8 @@ LogFile  %MYLOGFILE%
 # OUTPUTS
 
 <Output om_udp_1>
-  Module        om_udp
-  Host          10.1.20.99:514
-
-# Optional: normalize hostname to FQDN before formatting
-
-# IMPORTANT: call the xm_syslog instance correctly
+  Module      om_udp
+  Host        10.20.1.31:514
   <Exec>
     $Hostname = hostname_fqdn();
   </Exec>
@@ -60,6 +54,6 @@ LogFile  %MYLOGFILE%
 
 # ROUTES
 
-<Route dns_etw_route>
+<Route dns_route>
     Path ETW  => om_udp_1
 </Route>
