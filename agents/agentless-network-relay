@@ -1,0 +1,76 @@
+LogLevel  INFO
+LogFile  %MYLOGFILE%
+
+<Extension admin>
+  Module         xm_admin
+  LogLevel       WARNING
+  Host           agents.nxlog.mcc.dom:5515
+
+  SocketType     SSL
+  CAFile         %CERTDIR%/agent-ca.pem
+  CertFile       %CERTDIR%/agent-cert.pem
+  CertKeyFile    %CERTDIR%/agent-key.pem
+  <ACL conf>
+    Directory     %CONFDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+
+  <ACL cert>
+    Directory     %CERTDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+</Extension>
+
+<Extension syslog>
+  Module      xm_syslog
+</Extension>
+
+<Input nxlog>
+  Module      im_internal
+</Input>
+
+<Input bc>
+  Module         im_batchcompress
+  ListenAddr     0.0.0.0:2514
+  CAFile         %CERTDIR%/agent-ca.pem
+  CertFile       %CERTDIR%/agent-cert.pem
+  CertKeyFile    %CERTDIR%/agent-key.pem
+</Input>
+
+<Input tcp>
+  Module        im_tcp
+  ListenAddr    0.0.0.0:1514
+  Exec     syslog->parse_syslog();
+</Input>
+
+<Input ssl>
+  Module         im_ssl
+  ListenAddr     0.0.0.0:3514
+  CAFile         %CERTDIR%/agent-ca.pem
+  CertFile       %CERTDIR%/agent-cert.pem
+  CertKeyFile    %CERTDIR%/agent-key.pem
+  Exec     syslog->parse_syslog();
+</Input>
+
+<Input udp>
+  Module        im_udp
+  ListenAddr    0.0.0.0:1514
+  Exec     syslog->parse_syslog_bsd();
+</Input>
+
+<Output transport_relay>
+  Module             om_batchcompress
+  Host               relay.nxlog.mcc.dom:5514
+  UseSSL             TRUE
+  CAFile             %CERTDIR%/agent-ca.pem
+  CertFile           %CERTDIR%/agent-cert.pem
+  CertKeyFile        %CERTDIR%/agent-key.pem
+  LogqueueSize       1073741824
+  PersistLogqueue    TRUE
+</Output>
+
+<Route default>
+    Path ssl, tcp, udp, nxlog, bc  => transport_relay
+</Route>
