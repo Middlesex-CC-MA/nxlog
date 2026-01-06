@@ -4,3 +4,4 @@
 **/.vault_pass.txt
 *.xlsx
 .DS_Store
+*.msi
