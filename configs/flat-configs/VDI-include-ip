@@ -1,0 +1,191 @@
+############################################
+# Admin extension 
+
+<Extension admin>
+  Module         xm_admin
+  LogLevel       WARNING
+  Host           agents.nxlog.mcc.dom:5515
+  SocketType     SSL
+  CAFile         %CERTDIR%\agent-ca.pem
+  CertFile       %CERTDIR%\agent-cert.pem
+  CertKeyFile    %CERTDIR%\agent-key.pem
+
+  <ACL conf>
+    Directory     %CONFDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+
+  <ACL cert>
+    Directory     %CERTDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+</Extension>
+
+
+############################################
+# Global settings
+
+
+LogLevel  INFO
+LogFile   %MYLOGFILE%
+GenerateDateInUTC  TRUE
+ParseDateInUTC     TRUE
+
+
+############################################
+# Extensions
+
+
+<Extension syslog>
+  Module xm_syslog
+</Extension>
+
+<Extension json>
+  Module xm_json
+</Extension>
+
+
+############################################
+# Event Groups (macros)
+
+
+define  VDI_LogonLogout        4624, 4625, 4634, 4647, 4648, 4778, 4779
+define  VDI_Privileged         4672
+define  VDI_ProcessCreate      4688, 4689
+define  VDI_PS_Classic         400, 403, 600, 800
+define  VDI_PS_Operational     4103, 4104
+define  VDI_RDP_LSM            21, 22, 23, 24, 25
+define  VDI_RDP_RCM            1149
+define  VDI_LogTamper          1100, 1102, 1104, 1108
+define  VDI_MSI                11707, 11708, 11724
+
+
+############################################
+# Input: Omnissa (VMware Horizon) VDI Desktop
+
+
+<Input in_omnissa_vdi>
+  Module         im_msvistalog
+  ResolveSID     TRUE
+  ResolveGUID    TRUE
+  Language       en-US
+
+  <QueryXML>
+    <QueryList>
+      <Query Id="0">
+        <!-- Security -->
+        <Select Path="Security">
+          *[System[Provider[@Name='Microsoft-Windows-Security-Auditing']]]
+        </Select>
+
+        <!-- PowerShell -->
+        <Select Path="Windows PowerShell">*</Select>
+        <Select Path="Microsoft-Windows-PowerShell/Operational">*</Select>
+
+        <!-- RDP / session activity -->
+        <Select Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational">*</Select>
+        <Select Path="Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational">*</Select>
+
+        <!-- Horizon Agent (Application log) -->
+        <Select Path="Application">
+          *[System[Provider[@Name='VMware Horizon Agent' or @Name='VMware Horizon View Agent']]]
+        </Select>
+
+        <!-- MSI Installer -->
+        <Select Path="Application">
+          *[System[Provider[@Name='MsiInstaller']]]
+        </Select>
+      </Query>
+    </QueryList>
+  </QueryXML>
+
+  <Exec>
+    # ---- Context / Normalization ----
+    $Fields.role = "vdi";
+    $Fields.platform = "omnissa";
+    $Fields.environment = "production";
+    $Fields.organization = "mcc";
+    $Fields.domain = "middlesex.edu";
+
+    # Optional: help Taegis search by device/host consistently
+    $Fields.device_hostname = hostname();
+
+    # ---- Filtering (FIXED: avoid NOT IN syntax issues) ----
+    # Keep all Horizon Agent provider events in Application channel (already constrained).
+    if ($Channel != "Application")
+    {
+      if ( !(
+          ($EventID in (%VDI_LogonLogout%))    or
+          ($EventID in (%VDI_Privileged%))     or
+          ($EventID in (%VDI_ProcessCreate%))  or
+          ($EventID in (%VDI_PS_Classic%))     or
+          ($EventID in (%VDI_PS_Operational%)) or
+          ($EventID in (%VDI_RDP_LSM%))        or
+          ($EventID in (%VDI_RDP_RCM%))        or
+          ($EventID in (%VDI_LogTamper%))      or
+          ($EventID in (%VDI_MSI%))
+        ) )
+      {
+        drop();
+      }
+    }
+
+  </Exec>
+</Input>
+
+
+############################################
+# Output: NXLog Relay over TLS (FIXED)
+# om_batchcompress must wrap a real transport output (om_ssl)
+############################################
+<Output out_nxplatform>
+  Module         om_batchcompress
+  OutputType     om_ssl
+
+  Host           relay.nxlog.mcc.dom:5514
+
+  CAFile         %CERTDIR%\agent-ca.pem
+  CertFile       %CERTDIR%\agent-cert.pem
+  CertKeyFile    %CERTDIR%\agent-key.pem
+</Output>
+
+
+############################################
+# Output: Taegis (send JSON so View.* becomes fields)
+############################################
+<Output out_taegis>
+  Module      om_udp
+  Host        10.20.1.31:514
+
+  <Exec>
+    # Put the *entire event* into JSON so Taegis can extract keys/values.
+    # This is what will preserve View.ClientIPAddress, View.ForwardedClientIpAddress, etc.
+    $Message = to_json();
+
+    # Wrap JSON inside syslog so typical collectors accept it
+    syslog->to_syslog();
+  </Exec>
+</Output>
+
+
+# ############################################
+# # Optional debug: write exactly what we send to Taegis (recommended while testing)
+# ############################################
+# <Output out_debug_json>
+#   Module om_file
+#   File   "C:\\Program Files\\nxlog\\data\\taegis_payload_debug.log"
+
+#   <Exec>
+#     $Message = to_json() + "\r\n";
+#   </Exec>
+# </Output>
+
+
+############################################
+# Route
+############################################
+<Route r_omnissa_vdi>
+  Path in_omnissa_vdi => out_nxplatform, out_taegis, out_debug_json
+</Route>

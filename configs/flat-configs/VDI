@@ -1,0 +1,134 @@
+<Extension admin>
+  Module         xm_admin
+  LogLevel       WARNING
+  Host           agents.nxlog.mcc.dom:5515
+  SocketType     SSL
+  CAFile         %CERTDIR%/agent-ca.pem
+  CertFile       %CERTDIR%/agent-cert.pem
+  CertKeyFile    %CERTDIR%/agent-key.pem
+  <ACL conf>
+    Directory     %CONFDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+  <ACL cert>
+    Directory     %CERTDIR%
+    AllowRead     TRUE
+    AllowWrite    TRUE
+  </ACL>
+</Extension>
+
+# Omnissa (VMware Horizon) VDI Desktop Logging Profile
+# Role: Virtual Desktop (VDI)
+# Platform: Omnissa Horizon
+
+
+LogLevel  INFO
+LogFile  %MYLOGFILE%
+
+GenerateDateInUTC  TRUE
+ParseDateInUTC  TRUE
+
+# ---------------- Extensions ----------------
+
+<Extension syslog>
+  Module      xm_syslog
+</Extension>
+
+# ---------------- Event Groups ----------------
+define  VDI_LogonLogout        4624, 4625, 4634, 4647, 4648, 4778, 4779
+define  VDI_Privileged         4672
+define  VDI_ProcessCreate      4688, 4689
+define  VDI_PS_Classic         400, 403, 600, 800
+define  VDI_PS_Operational     4103, 4104
+define  VDI_RDP_LSM            21, 22, 23, 24, 25
+define  VDI_RDP_RCM            1149
+define  VDI_LogTamper          1100, 1102, 1104, 1108
+define  VDI_MSI                11707, 11708, 11724
+
+# ---------------- Input ----------------
+
+<Input in_omnissa_vdi>
+  Module         im_msvistalog
+  ResolveSID     TRUE
+  ResolveGUID    TRUE
+  Language       en-US
+
+  <QueryXML>
+    <QueryList>
+        <Query Id="0">
+            <!-- Security -->
+            <Select Path="Security">
+                *[System[Provider[@Name='Microsoft-Windows-Security-Auditing']]]
+            </Select>
+            <!-- PowerShell -->
+            <Select Path="Windows PowerShell">*</Select>
+            <Select Path="Microsoft-Windows-PowerShell/Operational">*</Select>
+            <!-- RDP / session activity -->
+            <Select Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational">*</Select>
+            <Select Path="Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational">*</Select>
+            <!-- Horizon Agent (Application log) -->
+            <Select Path="Application">
+                *[System[Provider[@Name='VMware Horizon Agent' or @Name='VMware Horizon View Agent']]]
+            </Select>
+            <!-- MSI Installer -->
+            <Select Path="Application">
+                *[System[Provider[@Name='MsiInstaller']]]
+            </Select>
+        </Query>
+    </QueryList>
+  </QueryXML>
+
+  <Exec>
+    # ---- Context / Normalization (NXP-safe) ----
+    $Fields.role = "vdi";
+    $Fields.platform = "omnissa";
+    $Fields.environment = "production";
+    $Fields.organization = "mcc";
+    $Fields.domain = "middlesex.edu";
+    
+    # ---- Filtering ----
+    # Keep all Horizon Agent provider events (don’t rely on EventID stability).
+    if ($Channel == "Application") {
+    # Allow Horizon Agent provider events + MSIInstaller events (already constrained by query)
+    # No additional drop filter needed here.
+    } else {
+    if (
+    ($EventID NOT IN (%VDI_LogonLogout%)) and
+    ($EventID NOT IN (%VDI_Privileged%)) and
+    ($EventID NOT IN (%VDI_ProcessCreate%)) and
+    ($EventID NOT IN (%VDI_PS_Classic%)) and
+    ($EventID NOT IN (%VDI_PS_Operational%)) and
+    ($EventID NOT IN (%VDI_RDP_LSM%)) and
+    ($EventID NOT IN (%VDI_RDP_RCM%)) and
+    ($EventID NOT IN (%VDI_LogTamper%)) and
+    ($EventID NOT IN (%VDI_MSI%))
+    ) {
+    drop();
+    }
+    }
+  </Exec>
+</Input>
+
+# ---------------- Output (NXLog Relay - TLS) ----------------
+
+<Output out_nxplatform>
+  Module         om_batchcompress
+  Host           relay.nxlog.mcc.dom:5514
+  UseSSL         TRUE
+  CAFile         %CERTDIR%\agent-ca.pem
+  CertFile       %CERTDIR%\agent-cert.pem
+  CertKeyFile    %CERTDIR%\agent-key.pem
+</Output>
+
+<Output out_taegis>
+  Module      om_udp
+  Host        10.20.1.31:514
+  Exec     syslog->to_syslog_snare();
+</Output>
+
+# ---------------- Route ----------------
+
+<Route r_omnissa_vdi>
+    Path in_omnissa_vdi  => out_nxplatform, out_taegis
+</Route>
